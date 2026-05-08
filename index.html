@@ -27,8 +27,9 @@
 
         let guests = [];
         let activeTableFilter = 'all';
+        let showCheckedOnly = false; // ★追加：受付済のみ表示フラグ
         let unsubscribe = null;
-        let pendingAction = null; // 誤作動防止用の待機アクション保存用
+        let pendingAction = null;
 
         const normalizeText = (str) => {
             if (!str) return "";
@@ -46,7 +47,6 @@
                 console.error("Auth Error:", e);
                 showError("ログインに失敗しました。");
             }
-
             onAuthStateChanged(auth, (user) => {
                 if (user) initListener();
             });
@@ -54,7 +54,6 @@
 
         function initListener() {
             if (unsubscribe) unsubscribe();
-            
             unsubscribe = onSnapshot(COLLECTION_REF, (snapshot) => {
                 guests = snapshot.docs.map(d => {
                     const data = d.data();
@@ -76,7 +75,6 @@
             document.getElementById('guest-list').innerHTML = `<div class="p-10 text-center text-red-500 font-bold">${msg}</div>`;
         }
 
-        // 誤作動防止：確認ダイアログを表示
         window.confirmToggle = (guestId, currentStatus, guestName) => {
             pendingAction = { guestId, currentStatus };
             const modal = document.getElementById('confirm-modal');
@@ -108,7 +106,6 @@
             if (!pendingAction) return;
             const { guestId, currentStatus } = pendingAction;
             closeModal();
-
             const guestRef = doc(db, 'artifacts', APP_ID, 'public', 'data', 'guests', guestId);
             try {
                 await updateDoc(guestRef, {
@@ -142,23 +139,39 @@
             render();
         };
 
+        // ★追加：受付済フィルタの切り替え
+        window.toggleCheckedFilter = () => {
+            showCheckedOnly = !showCheckedOnly;
+            render();
+        };
+
         function render() {
             const list = document.getElementById('guest-list');
             const search = (document.getElementById('search-input')?.value || "").toLowerCase();
             
+            // ★フィルタリングロジックの修正
             let filtered = guests.filter(g => {
                 const nameMatch = (g.name || "").toLowerCase().includes(search) || (g.kana || "").toLowerCase().includes(search);
                 const tableMatch = activeTableFilter === 'all' || g.displayTable === activeTableFilter;
-                return nameMatch && tableMatch;
+                const checkMatch = showCheckedOnly ? g.checkedIn === true : true; // 受付済フィルタ適用
+                return nameMatch && tableMatch && checkMatch;
             });
 
             filtered.sort((a, b) => (a.kana || "").localeCompare(b.kana || "", 'ja'));
 
             const checkedCount = guests.filter(g => g.checkedIn).length;
-            document.getElementById('stats').innerText = `受付済: ${checkedCount} / ${guests.length}`;
+            
+            // ★統計表示（ボタン）の更新
+            const statsBtn = document.getElementById('stats');
+            statsBtn.innerText = `受付済: ${checkedCount} / ${guests.length}`;
+            if (showCheckedOnly) {
+                statsBtn.className = "text-[10px] font-bold bg-green-500 text-white px-3 py-1 rounded-full border border-green-600 shadow-sm transition-colors active:scale-95";
+            } else {
+                statsBtn.className = "text-[10px] font-bold text-gray-500 bg-white px-3 py-1 rounded-full border shadow-sm transition-colors active:scale-95";
+            }
 
             if (filtered.length === 0) {
-                list.innerHTML = `<div class="p-20 text-center text-gray-400 font-bold">該当するゲストはいません</div>`;
+                list.innerHTML = `<div class="p-20 text-center text-gray-400 font-bold">${showCheckedOnly ? '受付済のゲストはいません' : '該当するゲストはいません'}</div>`;
                 return;
             }
 
@@ -199,7 +212,8 @@
         <div class="max-w-2xl mx-auto px-4 py-4">
             <div class="flex justify-between items-center mb-4">
                 <h1 class="text-xl font-black text-gray-900 tracking-tight">GUEST CHECK-IN</h1>
-                <div id="stats" class="text-[10px] font-bold text-gray-500 bg-white px-3 py-1 rounded-full border shadow-sm">読み込み中...</div>
+                <!-- divをbuttonに変更し、onclickを追加 -->
+                <button id="stats" onclick="toggleCheckedFilter()" class="text-[10px] font-bold text-gray-500 bg-white px-3 py-1 rounded-full border shadow-sm transition-colors active:scale-95">読み込み中...</button>
             </div>
 
             <div id="table-tabs" class="flex gap-2 overflow-x-auto pb-3 no-scrollbar">
@@ -228,20 +242,14 @@
         </div>
     </div>
 
-    <!-- 確認モーダル (誤作動防止用) -->
+    <!-- 確認モーダル -->
     <div id="confirm-modal" class="fixed inset-0 z-[100] hidden items-center justify-center p-6 bg-black/60 backdrop-blur-sm">
         <div class="bg-white w-full max-w-xs rounded-[2.5rem] shadow-2xl overflow-hidden animate-pop">
             <div class="p-8 text-center">
-                <div id="modal-message" class="mb-8">
-                    <!-- JSで挿入 -->
-                </div>
+                <div id="modal-message" class="mb-8"></div>
                 <div class="flex flex-col gap-3">
-                    <button id="modal-confirm-btn" onclick="executeToggle()" class="w-full">
-                        確定
-                    </button>
-                    <button onclick="closeModal()" class="w-full py-4 text-gray-400 font-bold hover:text-gray-600 transition-colors">
-                        キャンセル
-                    </button>
+                    <button id="modal-confirm-btn" onclick="executeToggle()" class="w-full">確定</button>
+                    <button onclick="closeModal()" class="w-full py-4 text-gray-400 font-bold hover:text-gray-600 transition-colors">キャンセル</button>
                 </div>
             </div>
         </div>
